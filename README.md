@@ -10,3 +10,13 @@ only the page, so it can be served by GitHub Pages.
 
 The waitlist form posts to the app's Cloudflare worker (`/waitlist`), which
 saves the address to a write-only Firestore collection and DMs the owner.
+
+## Promo reel
+
+`promo/reel.html` is a 20 second vertical explainer (1080×1920) for Instagram
+stories and reels. Every frame is drawn by `renderFrame(t)` on a canvas, so the
+page plays it, scrubs it, and can record it in the browser.
+
+`node promo/render.mjs` steps through it frame by frame and writes
+`promo/sideline-reel.mp4` (H.264, 30 fps). It needs Playwright and an ffmpeg
+with libx264 (`FFMPEG=/path/to/ffmpeg` if it is not on the PATH).
