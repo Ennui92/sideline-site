@@ -13,7 +13,7 @@ saves the address to a write-only Firestore collection and DMs the owner.
 
 ## Promo reel
 
-`promo/reel.html` is a 21 second vertical explainer (1080×1920) with a
+`promo/reel.html` is a 23 second vertical explainer (1080×1920) with a
 voiceover, for Instagram stories and reels. Every frame is drawn by
 `renderFrame(t)` on a canvas, so the page plays it (with the voice), scrubs it,
 and can record it in the browser.
