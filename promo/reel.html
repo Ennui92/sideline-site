@@ -47,8 +47,8 @@ body.render canvas{height:auto;width:1080px;border:0;border-radius:0;box-shadow:
 <audio id="vo" src="voiceover.m4a" preload="auto"></audio>
 <div class="bar">
   <button id="play" class="primary">Pause</button>
-  <input id="scrub" type="range" min="0" max="22.7" step="0.0333" value="0" aria-label="Scrub">
-  <span id="time">0.0 / 22.7s</span>
+  <input id="scrub" type="range" min="0" max="22.6" step="0.0333" value="0" aria-label="Scrub">
+  <span id="time">0.0 / 22.6s</span>
   <button id="rec">Record a video file</button>
 </div>
 <p class="note">23 seconds with voiceover, 1080×1920, made for stories and reels. Every frame is drawn by <code>renderFrame(t)</code>. Recording plays it once in real time and saves what your browser supports (MP4 or WebM).</p>
@@ -61,7 +61,7 @@ body.render canvas{height:auto;width:1080px;border:0;border-radius:0;box-shadow:
    Look and feel is the app's "Sunday Club": cream ground, thick ink outlines,
    hard shadows with no blur, fat type. */
 
-const W = 1080, H = 1920, FPS = 30, DUR = 22.7;
+const W = 1080, H = 1920, FPS = 30, DUR = 22.6;
 const C = {
   paper:"#FFF4E3", paperWarm:"#F7E7CE", surface:"#FFFFFF",
   ink:"#21160E", inkSoft:"#5C4A39", inkFaint:"#9A8570",
@@ -356,10 +356,10 @@ function burst(t, t0, x, y, n = 18, spread = 260) {
 
 /* ── Scenes ─────────────────────────────────────────────────────────────── */
 
-// 1. The hook: someone you love is about to run 42.2 km.
+// 1. The hook: you are about to run 42.2 km, and your friends want to be there.
 function sceneHook(t) {
   at(90, 360, { a: fade(t, 0.05) }, () => label("Sunday morning, race day", 0, 0, C.flare, 32));
-  const words = [["Your", "friend"], ["is", "running"], ["a", "marathon."]];
+  const words = [["You're", "running"], ["a", "marathon."]];
   let k = 0;
   words.forEach((line, li) => {
     let x = 90;
@@ -372,18 +372,18 @@ function sceneHook(t) {
   });
   // The distance, slapped on like a sticker.
   const s = pop(t, 0.95, 0.45);
-  at(540, 1040, { s, r: -0.07 }, () => {
+  at(540, 930, { s, r: -0.07 }, () => {
     card(-300, -110, 600, 220, { fill: C.flare, r: 110, shadow: 14 });
     txt("42.2 km", 0, 52, { fam: HEAD, w: 900, size: 150, color: "#fff", align: "center", ls: -3 });
   });
-  at(540, 1265, { a: fade(t, 1.35, 0.25) }, () => txt("That is a very long way to run alone.", 0, 0, { size: 50, w: 700, color: C.inkSoft, align: "center" }));
+  at(540, 1170, { a: fade(t, 1.6, 0.25) }, () => txt("And your friends want to be there.", 0, 0, { size: 54, w: 800, color: C.inkSoft, align: "center" }));
   // The course line with the runner's dot on it, the app's own motif.
   const line = new Path2D("M-40 1470 C 140 1470, 200 1360, 340 1360 C 470 1360, 520 1480, 660 1480 C 800 1480, 860 1380, 1120 1380");
   const d = eo(prog(t, 0.2, 1.4));
   ctx.save(); ctx.lineWidth = 30; ctx.lineCap = "round"; ctx.strokeStyle = C.ink;
   ctx.setLineDash([1400 * d, 3000]); ctx.stroke(line); ctx.setLineDash([]); ctx.restore();
   if (d > 0.4) {
-    const p = bezPoint(lerp(60, 900, eio(prog(t, 0.8, 2.1))));
+    const p = bezPoint(lerp(60, 900, eio(prog(t, 0.8, 3.0))));
     ctx.fillStyle = C.flare; circle(p[0], p[1], 30); ctx.fill();
     ctx.lineWidth = 6; ctx.strokeStyle = C.ink; ctx.stroke();
   }
@@ -411,7 +411,7 @@ function cubic(s, u) {
 // 2. The problem: the group chat on race day.
 function sceneChaos(t) {
   caption(t, "Race day, the usual way", ["The group chat."], { size: 120 });
-  const land = 2.45; // on "nobody's" in the voiceover
+  const land = 1.85; // just after "who brings what?" in the voiceover
   const shake = t > land && t < land + 0.35 ? Math.sin((t - land) * 70) * 10 * (1 - (t - land) / 0.35) : 0;
   ctx.save(); ctx.translate(shake, 0);
   const rows = [
@@ -442,8 +442,8 @@ function sceneBrand(t) {
   at(540, 1110, { s: q }, () => txt("Sideline", 0, 0, { fam: HEAD, w: 900, size: 210, align: "center", ls: -5 }));
   const a = eo(prog(t, 0.8, 1.2));
   at(540, 1240 + (1 - a) * 40, { a }, () => {
-    txt("Get your people to", 0, 0, { size: 70, w: 800, color: C.inkSoft, align: "center" });
-    txt("the right kilometre.", 0, 88, { size: 70, w: 800, color: C.inkSoft, align: "center" });
+    txt("Your cheer squad,", 0, 0, { size: 76, w: 800, color: C.inkSoft, align: "center" });
+    txt("organised.", 0, 92, { size: 76, w: 800, color: C.flare, align: "center" });
   });
   burst(t, 0.55, 540, 720, 22, 360);
 }
@@ -570,7 +570,7 @@ function sceneSupplies(t) {
 function sceneLive(t) {
   caption(t, "3 · Race day", ["Follow them live."], { size: 112 });
   const cs = eo(prog(t, 0.05, 0.35));
-  const runKm = lerp(9, 28.5, eio(prog(t, 0.3, 2.45)));
+  const runKm = lerp(9, 28.5, eio(prog(t, 0.3, 2.3)));
   at(0, (1 - cs) * 200, { a: cs }, () => {
     card(80, 520, 920, 270, { r: 48 });
     const x0 = 150, x1 = 930, y = 650;
@@ -587,7 +587,7 @@ function sceneLive(t) {
     runnerDot(X(runKm), y, 38);
     // Jonas's ETA, counting down as the runner closes in.
     const mins = Math.max(0, Math.round((28.5 - runKm) * 0.53));
-    const eq = pop(t, 0.6, 0.35) * (1 - fade(t, 2.4, 0.1));
+    const eq = pop(t, 0.6, 0.35) * (1 - fade(t, 2.25, 0.1));
     at(X(28.5), 575, { s: eq, a: eq }, () => {
       const s = `Jonas · ${mins} min`;
       const w = measure(s, 800, 30) + 44;
@@ -613,8 +613,8 @@ function sceneLive(t) {
       lines.slice(0, 2).forEach((l, k) => txt(l, 235, y + 132 + k * 40, { size: 34, w: 600, color: C.inkSoft }));
     });
   });
-  // The moment: the runner reaches Jonas, on "you're right there".
-  const tq = pop(t, 2.45, 0.4);
+  // The moment: the runner reaches Jonas, on "and they're ready for you".
+  const tq = pop(t, 2.3, 0.4);
   at(540, 826, { s: tq, a: tq }, () => {
     const s = "Jonas just saw Ermis at km 28.5";
     const w = measure(s, 800, 38) + 150;
@@ -623,7 +623,7 @@ function sceneLive(t) {
     face(-w / 2 + 62, 0, 30, "jonas", C.mint);
     txt(s, -w / 2 + 112, 13, { size: 38, w: 800, color: C.paper });
   });
-  burst(t, 2.45, lerp(150, 930, 28.5 / 42.2), 650, 20, 240);
+  burst(t, 2.3, lerp(150, 930, 28.5 / 42.2), 650, 20, 240);
 }
 
 // 7. The chat and the wall.
@@ -718,13 +718,13 @@ function sceneEnd(t) {
 // Scene boundaries follow the voiceover (voiceover.json), so each line is
 // spoken over the scene it describes.
 const SCENES = [
-  [0.0, 2.2, sceneHook],
-  [2.2, 6.4, sceneChaos],
-  [6.4, 8.2, sceneBrand],
-  [8.2, 11.5, sceneCoverage],
-  [11.5, 14.7, sceneSupplies],
-  [14.7, 18.05, sceneLive],
-  [18.05, 19.8, scenePeople],
+  [0.0, 3.4, sceneHook],
+  [3.4, 6.1, sceneChaos],
+  [6.1, 8.6, sceneBrand],
+  [8.6, 11.75, sceneCoverage],
+  [11.75, 13.9, sceneSupplies],
+  [13.9, 17.55, sceneLive],
+  [17.55, 19.8, scenePeople],
   [19.8, DUR, sceneEnd],
 ];
 const OUT = 0.26;

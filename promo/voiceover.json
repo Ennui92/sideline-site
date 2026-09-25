@@ -2,15 +2,15 @@
   "voice": "af_heart",
   "speed": 1.1,
   "lang": "en-us",
-  "duration": 22.7,
+  "duration": 22.6,
   "lines": [
-    { "at": 0.2,   "text": "Your friend is running a marathon." },
-    { "at": 2.3,   "text": "But everyone ends up at the same corner, and nobody's at kilometre thirty." },
-    { "at": 6.75,  "text": "Sideline fixes that." },
-    { "at": 8.5,   "text": "Pick your spots, and fill the gaps." },
-    { "at": 11.6,  "text": "Sort out who brings what, so nobody brings three bananas." },
-    { "at": 14.8,  "text": "Then follow them live, so when they hit the wall... you're right there." },
-    { "at": 18.1,  "text": "Every photo, in one place." },
+    { "at": 0.2,   "text": "You're running a marathon. And your friends want to cheer you on." },
+    { "at": 3.55,  "text": "But who stands where? And who brings what?" },
+    { "at": 6.25,  "text": "Sideline organizes your cheer squad." },
+    { "at": 8.9,   "text": "Friends show where they'll be on the course," },
+    { "at": 11.7,  "text": "and what they're bringing." },
+    { "at": 14.0,  "text": "On race day, they see you coming, live... and they're ready for you." },
+    { "at": 17.7,  "text": "Every cheer, every photo, shared with the squad." },
     { "at": 19.95, "text": "Sideline. Get your people to the right kilometre." }
   ]
 }
