@@ -44,13 +44,14 @@ body.render canvas{height:auto;width:1080px;border:0;border-radius:0;box-shadow:
 </head>
 <body>
 <canvas id="reel" width="1080" height="1920" aria-label="Sideline explainer animation"></canvas>
+<audio id="vo" src="voiceover.m4a" preload="auto"></audio>
 <div class="bar">
   <button id="play" class="primary">Pause</button>
-  <input id="scrub" type="range" min="0" max="20" step="0.0333" value="0" aria-label="Scrub">
-  <span id="time">0.0 / 20s</span>
+  <input id="scrub" type="range" min="0" max="21.4" step="0.0333" value="0" aria-label="Scrub">
+  <span id="time">0.0 / 21.4s</span>
   <button id="rec">Record a video file</button>
 </div>
-<p class="note">20 seconds, 1080×1920, made for stories and reels. Every frame is drawn by <code>renderFrame(t)</code>. Recording plays it once in real time and saves what your browser supports (MP4 or WebM).</p>
+<p class="note">21 seconds with voiceover, 1080×1920, made for stories and reels. Every frame is drawn by <code>renderFrame(t)</code>. Recording plays it once in real time and saves what your browser supports (MP4 or WebM).</p>
 
 <script>
 /* Sideline, the 20 second version.
@@ -60,7 +61,7 @@ body.render canvas{height:auto;width:1080px;border:0;border-radius:0;box-shadow:
    Look and feel is the app's "Sunday Club": cream ground, thick ink outlines,
    hard shadows with no blur, fat type. */
 
-const W = 1080, H = 1920, FPS = 30, DUR = 20;
+const W = 1080, H = 1920, FPS = 30, DUR = 21.4;
 const C = {
   paper:"#FFF4E3", paperWarm:"#F7E7CE", surface:"#FFFFFF",
   ink:"#21160E", inkSoft:"#5C4A39", inkFaint:"#9A8570",
@@ -410,7 +411,7 @@ function cubic(s, u) {
 // 2. The problem: the group chat on race day.
 function sceneChaos(t) {
   caption(t, "Race day, the usual way", ["The group chat."], { size: 120 });
-  const land = 2.0;
+  const land = 2.4; // on "Nobody" in the voiceover
   const shake = t > land && t < land + 0.35 ? Math.sin((t - land) * 70) * 10 * (1 - (t - land) / 0.35) : 0;
   ctx.save(); ctx.translate(shake, 0);
   const rows = [
@@ -714,15 +715,17 @@ function sceneEnd(t) {
 }
 
 /* ── The timeline ───────────────────────────────────────────────────────── */
+// Scene boundaries follow the voiceover (voiceover.json), so each line is
+// spoken over the scene it describes.
 const SCENES = [
-  [0.0, 2.5, sceneHook],
-  [2.5, 5.3, sceneChaos],
-  [5.3, 7.3, sceneBrand],
-  [7.3, 10.8, sceneCoverage],
-  [10.8, 13.1, sceneSupplies],
-  [13.1, 16.4, sceneLive],
-  [16.4, 18.3, scenePeople],
-  [18.3, 20.0, sceneEnd],
+  [0.0, 2.3, sceneHook],
+  [2.3, 5.8, sceneChaos],
+  [5.8, 7.7, sceneBrand],
+  [7.7, 11.0, sceneCoverage],
+  [11.0, 13.95, sceneSupplies],
+  [13.95, 17.05, sceneLive],
+  [17.05, 18.95, scenePeople],
+  [18.95, DUR, sceneEnd],
 ];
 const OUT = 0.26;
 
@@ -761,25 +764,34 @@ const render = new URLSearchParams(location.search).has("render");
 if (render) document.body.classList.add("render");
 const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub");
 const timeEl = document.getElementById("time"), recBtn = document.getElementById("rec");
-let playing = !render, t0 = performance.now(), offset = 0, recording = false;
+let playing = !render, t0 = performance.now(), offset = 0, recording = false, soundOn = false;
 
+const vo = document.getElementById("vo");
 function show(t) { renderFrame(t); scrub.value = t; timeEl.textContent = `${t.toFixed(1)} / ${DUR}s`; }
+// The voiceover follows the picture: started, stopped and re-seeked with it.
+function voiceAt(t, on) {
+  if (render) return;
+  if (Math.abs(vo.currentTime - t) > 0.15) vo.currentTime = t;
+  if (on && vo.paused) vo.play().catch(() => {});
+  if (!on && !vo.paused) vo.pause();
+}
 function tick(now) {
   if (playing) {
     let t = offset + (now - t0) / 1000;
     if (t >= DUR) {
       if (recording) { show(DUR); stopRecording(); return requestAnimationFrame(tick); }
-      t = 0; offset = 0; t0 = now;
+      t = 0; offset = 0; t0 = now; vo.currentTime = 0;
     }
     show(t);
+    if (soundOn && vo.paused && !vo.ended) voiceAt(t, true);
   }
   requestAnimationFrame(tick);
 }
 playBtn.onclick = () => {
-  if (playing) { offset = +scrub.value; playing = false; playBtn.textContent = "Play"; }
-  else { if (+scrub.value >= DUR) scrub.value = 0; offset = +scrub.value; t0 = performance.now(); playing = true; playBtn.textContent = "Pause"; }
+  if (playing) { offset = +scrub.value; playing = false; playBtn.textContent = "Play"; voiceAt(offset, false); }
+  else { if (+scrub.value >= DUR) scrub.value = 0; offset = +scrub.value; t0 = performance.now(); playing = true; playBtn.textContent = "Pause"; voiceAt(offset, true); }
 };
-scrub.oninput = () => { playing = false; playBtn.textContent = "Play"; offset = +scrub.value; show(offset); };
+scrub.oninput = () => { playing = false; playBtn.textContent = "Play"; offset = +scrub.value; show(offset); voiceAt(offset, false); };
 
 // Browser-side export: plays once in real time and records the canvas.
 let recorder, chunks;
@@ -787,7 +799,9 @@ recBtn.onclick = () => {
   if (recording || !window.MediaRecorder) return;
   const types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
   const type = types.find((m) => MediaRecorder.isTypeSupported(m)) || "";
-  recorder = new MediaRecorder(cv.captureStream(FPS), { mimeType: type, videoBitsPerSecond: 12e6 });
+  const stream = cv.captureStream(FPS);
+  try { if (vo.captureStream) vo.captureStream().getAudioTracks().forEach((tr) => stream.addTrack(tr)); } catch (e) { /* silent recording */ }
+  recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 12e6 });
   chunks = [];
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   recorder.onstop = () => {
@@ -800,14 +814,18 @@ recBtn.onclick = () => {
   };
   recording = true; recBtn.disabled = true; recBtn.textContent = "Recording…";
   offset = 0; t0 = performance.now(); playing = true; playBtn.textContent = "Pause";
+  vo.currentTime = 0; voiceAt(0, true);
   recorder.start();
 };
-function stopRecording() { recording = false; playing = false; playBtn.textContent = "Play"; recorder.stop(); }
+function stopRecording() { recording = false; playing = false; playBtn.textContent = "Play"; voiceAt(DUR, false); recorder.stop(); }
 
 // Draw nothing until the brand fonts are in, or the first frames use a fallback.
 window.ready = Promise.all([document.fonts.load('900 100px "Gabarito"'), document.fonts.load('800 40px "Figtree"'), document.fonts.load('600 40px "Figtree"')])
   .then(() => document.fonts.ready)
   .then(() => { show(0); if (!render) requestAnimationFrame((n) => { t0 = n; tick(n); }); });
+// Browsers block sound until the page is touched, so the first autoplay loop is
+// silent; any press on the page starts the voice in sync.
+document.addEventListener("pointerdown", () => { soundOn = true; });
 </script>
 </body>
 </html>

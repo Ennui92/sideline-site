@@ -2,9 +2,11 @@
 //
 //   node promo/render.mjs [out.mp4]
 //
+// Mixes in promo/voiceover.wav when it exists (see voiceover.py).
 // Needs Playwright (with a Chromium) and ffmpeg with libx264. Set FFMPEG to
 // point at a specific ffmpeg binary if it is not on the PATH.
 import { spawn, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -27,16 +29,25 @@ await page.evaluate(() => window.ready);
 const { FPS, DUR } = await page.evaluate(() => window.REEL);
 const frames = Math.round(FPS * DUR);
 
-// A silent stereo track: some players and upload paths treat a video with no
-// audio stream oddly. Instagram lets you add music on top.
+// The voiceover from voiceover.py, levelled to the loudness Instagram plays at
+// (-14 LUFS). Without one the video gets a silent track, because some players
+// and upload paths treat a video with no audio stream oddly.
+const voice = path.join(here, "voiceover.wav");
+const hasVoice = existsSync(voice);
+const audioIn = hasVoice ? ["-i", voice] : ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"];
+const audioFx = hasVoice ? ["-af", "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,apad"] : [];
+if (hasVoice) {
+  // The page plays this copy alongside the animation.
+  execSync(`"${ffmpeg}" -y -loglevel error -i "${voice}" -af loudnorm=I=-14:TP=-1.5:LRA=11 -ar 44100 -c:a aac -b:a 128k "${path.join(here, "voiceover.m4a")}"`);
+}
 const ff = spawn(ffmpeg, [
   "-y", "-loglevel", "error",
   "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
-  "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-  "-map", "0:v", "-map", "1:a", "-shortest",
+  ...audioIn,
+  "-map", "0:v", "-map", "1:a", ...audioFx, "-t", String(DUR),
   "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p",
   "-profile:v", "high", "-r", String(FPS),
-  "-c:a", "aac", "-b:a", "128k",
+  "-c:a", "aac", "-b:a", "128k", "-ac", "2",
   "-movflags", "+faststart", out,
 ], { stdio: ["pipe", "inherit", "inherit"] });
 const done = new Promise((res, rej) => ff.on("close", (c) => (c ? rej(new Error("ffmpeg exited " + c)) : res())));

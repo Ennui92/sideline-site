@@ -1,0 +1,16 @@
+{
+  "voice": "af_heart",
+  "speed": 1.1,
+  "lang": "en-us",
+  "duration": 21.4,
+  "lines": [
+    { "at": 0.2,  "text": "Your friend is running a marathon!" },
+    { "at": 2.4,  "text": "The group chat? Everyone at one corner. Nobody at thirty." },
+    { "at": 6.2,  "text": "Meet Sideline." },
+    { "at": 8.0,  "text": "See who's standing where, and fill the gaps." },
+    { "at": 11.1, "text": "Say who's bringing water, gels, and the big sign." },
+    { "at": 14.05, "text": "Race day? Follow them live, three ways." },
+    { "at": 17.15, "text": "One chat. Every photo." },
+    { "at": 19.1, "text": "Sideline. Free, on the web today." }
+  ]
+}
