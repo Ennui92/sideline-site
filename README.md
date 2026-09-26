@@ -22,6 +22,11 @@ The voiceover script and timings live in `promo/voiceover.json`.
 `python promo/voiceover.py <kokoro.onnx> <voices.bin>` speaks it with Kokoro, a
 local open text to speech model (voice `af_heart`), into `promo/voiceover.wav`.
 
+`node promo/stills.mjs` renders the screens the site shows under "A look
+inside" (and the video's poster) from the same drawings, into
+`assets/screens/`. `voiceover.py` also writes the player's captions,
+`promo/sideline-reel.vtt`.
+
 `node promo/render.mjs` steps through the reel frame by frame and writes
 `promo/sideline-reel.mp4` (H.264, 30 fps, voice levelled to -14 LUFS). It needs
 Playwright and an ffmpeg with libx264 (`FFMPEG=/path/to/ffmpeg` if it is not on

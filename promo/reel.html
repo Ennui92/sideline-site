@@ -340,6 +340,7 @@ function caption(t, lab, lines, o = {}) {
 
 /* A little burst of confetti in the palette, for the good moments. */
 function burst(t, t0, x, y, n = 18, spread = 260) {
+  if (still) return;
   const q = prog(t, t0, t0 + 0.9);
   if (q <= 0 || q >= 1) return;
   const cols = [C.flare, C.sun, C.mint, C.sky, C.rose, C.grape];
@@ -731,6 +732,7 @@ const OUT = 0.26;
 
 function background(t) {
   ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+  if (still) return;
   ctx.fillStyle = C.sunSoft; circle(960 + Math.sin(t * 0.6) * 30, 150 + Math.cos(t * 0.5) * 20, 250); ctx.fill();
   ctx.fillStyle = C.flareSoft; circle(60 + Math.cos(t * 0.5) * 30, 1820 + Math.sin(t * 0.7) * 20, 280); ctx.fill();
 }
@@ -757,6 +759,9 @@ function renderFrame(t) {
   }
 }
 window.renderFrame = renderFrame;
+// Stills for the website: the same frame on a plain ground, without confetti.
+let still = false;
+window.renderStill = (t) => { still = true; try { renderFrame(t); } finally { still = false; } };
 window.REEL = { W, H, FPS, DUR };
 
 /* ── Player ─────────────────────────────────────────────────────────────── */
