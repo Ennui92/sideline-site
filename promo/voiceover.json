@@ -1,0 +1,16 @@
+{
+  "voice": "af_heart",
+  "speed": 1.1,
+  "lang": "en-us",
+  "duration": 22.6,
+  "lines": [
+    { "at": 0.2,   "text": "You're running a marathon. And your friends want to cheer you on." },
+    { "at": 3.55,  "text": "But who stands where? And who brings what?" },
+    { "at": 6.25,  "text": "Sideline organizes your cheer squad." },
+    { "at": 8.9,   "text": "Friends show where they'll be on the course," },
+    { "at": 11.7,  "text": "and what they're bringing." },
+    { "at": 14.0,  "text": "On race day, they see you coming, live... and they're ready for you." },
+    { "at": 17.7,  "text": "Every cheer, every photo, shared with the squad." },
+    { "at": 19.95, "text": "Sideline. Get your people to the right kilometre." }
+  ]
+}

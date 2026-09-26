@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sideline Reel</title>
+<meta name="description" content="A 20 second vertical explainer for Sideline, drawn frame by frame in JavaScript, for Instagram stories and reels.">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="../assets/favicon.png">
+<style>
+@font-face{font-family:"Gabarito";src:url(fonts/gabarito.woff2) format("woff2");font-weight:400 900;font-display:block}
+@font-face{font-family:"Figtree";src:url(fonts/figtree.woff2) format("woff2");font-weight:300 900;font-display:block}
+:root{--paper:#FFF4E3;--ink:#21160E;--soft:#5C4A39;--surface:#FFFFFF;--flare:#F0522B}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--paper:#1A120B;--ink:#FFF1DC;--soft:#CBB49B;--surface:#2A1D13;--flare:#FF6B44}
+}
+:root[data-theme="dark"]{--paper:#1A120B;--ink:#FFF1DC;--soft:#CBB49B;--surface:#2A1D13;--flare:#FF6B44}
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;background:var(--paper);color:var(--ink);
+  font:500 16px/1.4 "Figtree",-apple-system,sans-serif;
+  display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px;
+}
+/* The canvas is always 1080x1920 inside; CSS only scales what you see. */
+canvas{
+  display:block;height:min(78vh,calc((100vw - 32px) * 16 / 9));aspect-ratio:9/16;max-width:100%;
+  border:2.5px solid var(--ink);border-radius:18px;box-shadow:4px 4px 0 var(--ink);background:#FFF4E3;
+}
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;width:min(100%,440px)}
+.bar input[type=range]{flex:1;min-width:140px;accent-color:var(--flare)}
+button{
+  font:800 15px/1 "Figtree",sans-serif;padding:11px 16px;border-radius:999px;cursor:pointer;
+  border:2.5px solid var(--ink);box-shadow:3px 3px 0 var(--ink);background:var(--surface);color:var(--ink);
+}
+button.primary{background:var(--flare);color:#fff}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+button:disabled{opacity:.6;cursor:default}
+#time{font:800 14px/1 "Figtree",sans-serif;font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.note{max-width:440px;text-align:center;color:var(--soft);font-size:14px;margin:0}
+body.render{padding:0;background:#FFF4E3}
+body.render .bar,body.render .note{display:none}
+body.render canvas{height:auto;width:1080px;border:0;border-radius:0;box-shadow:none}
+</style>
+</head>
+<body>
+<canvas id="reel" width="1080" height="1920" aria-label="Sideline explainer animation"></canvas>
+<audio id="vo" src="voiceover.m4a" preload="auto"></audio>
+<div class="bar">
+  <button id="play" class="primary">Pause</button>
+  <input id="scrub" type="range" min="0" max="22.6" step="0.0333" value="0" aria-label="Scrub">
+  <span id="time">0.0 / 22.6s</span>
+  <button id="rec">Record a video file</button>
+</div>
+<p class="note">23 seconds with voiceover, 1080×1920, made for stories and reels. Every frame is drawn by <code>renderFrame(t)</code>. Recording plays it once in real time and saves what your browser supports (MP4 or WebM).</p>
+
+<script>
+/* Sideline, the 20 second version.
+   Everything on screen is a pure function of time: renderFrame(t) draws the
+   frame at t seconds from nothing, so the page can play it, scrub it, or have
+   render.mjs step through it frame by frame for a clean MP4.
+   Look and feel is the app's "Sunday Club": cream ground, thick ink outlines,
+   hard shadows with no blur, fat type. */
+
+const W = 1080, H = 1920, FPS = 30, DUR = 22.6;
+const C = {
+  paper:"#FFF4E3", paperWarm:"#F7E7CE", surface:"#FFFFFF",
+  ink:"#21160E", inkSoft:"#5C4A39", inkFaint:"#9A8570",
+  flare:"#F0522B", flareSoft:"#FFE0D5", sun:"#F2B705", sunSoft:"#FFF0C9",
+  mint:"#1FA97B", mintSoft:"#D5F3E7", sky:"#4C7DF0", skySoft:"#DEE8FF",
+  grape:"#7C5CF0", grapeSoft:"#E8E2FF", rose:"#E8386D", roseSoft:"#FFDCE7",
+};
+const HEAD = '"Gabarito", sans-serif', BODY = '"Figtree", sans-serif';
+const cv = document.getElementById("reel");
+const screen = cv.getContext("2d");
+// Scenes draw into a buffer that is faded as one image, so a card's hard
+// shadow never shows through the card itself while it fades out.
+const buf = Object.assign(document.createElement("canvas"), { width: W, height: H });
+const bufCtx = buf.getContext("2d");
+let ctx = screen;
+
+/* ── Timing ─────────────────────────────────────────────────────────────── */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const back = (x) => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+/** Scale for something that pops in at t0: 0, overshoot, settle at 1. */
+const pop = (t, t0, d = 0.42) => { const x = prog(t, t0, t0 + d); return x <= 0 ? 0 : back(x); };
+const fade = (t, t0, d = 0.14) => prog(t, t0, t0 + d);
+
+/* ── Drawing primitives ─────────────────────────────────────────────────── */
+const layers = [];
+let depth = 0;
+/** Draw fn at (x, y) scaled, rotated and faded. A faded element is drawn
+    opaque onto its own layer first and then faded as a whole, so shadows
+    and outlines never show through the fills above them. */
+function at(x, y, o, fn) {
+  const s = o.s ?? 1, a = clamp(o.a ?? 1);
+  if (s <= 0.001 || a <= 0.001) return;
+  if (a < 0.999) {
+    const layer = layers[depth] ??= Object.assign(document.createElement("canvas"), { width: W, height: H }).getContext("2d");
+    const parent = ctx;
+    layer.setTransform(1, 0, 0, 1, 0, 0); layer.globalAlpha = 1; layer.clearRect(0, 0, W, H);
+    layer.setTransform(parent.getTransform());
+    ctx = layer; depth++;
+    try { at(x, y, { ...o, a: 1 }, fn); } finally { depth--; ctx = parent; }
+    parent.save(); parent.setTransform(1, 0, 0, 1, 0, 0); parent.globalAlpha *= a;
+    parent.drawImage(layer.canvas, 0, 0); parent.restore();
+    return;
+  }
+  ctx.save(); ctx.translate(x, y); ctx.rotate(o.r ?? 0); ctx.scale(s, s);
+  fn(); ctx.restore();
+}
+function font(w, size, fam = BODY) { ctx.font = `${w} ${size}px ${fam}`; }
+function txt(s, x, y, o = {}) {
+  font(o.w ?? 800, o.size ?? 40, o.fam ?? BODY);
+  ctx.letterSpacing = (o.ls ?? 0) + "px";
+  ctx.fillStyle = o.color ?? C.ink;
+  ctx.textAlign = o.align ?? "left";
+  ctx.textBaseline = o.base ?? "alphabetic";
+  ctx.fillText(s, x, y);
+  ctx.letterSpacing = "0px";
+}
+/** Shrinks the font until the string fits, then draws it. */
+function fitTxt(s, x, y, maxW, o = {}) {
+  let size = o.size ?? 40;
+  font(o.w ?? 800, size, o.fam ?? BODY);
+  while (ctx.measureText(s).width > maxW && size > 12) { size -= 1; font(o.w ?? 800, size, o.fam ?? BODY); }
+  txt(s, x, y, { ...o, size });
+}
+function measure(s, w, size, fam = BODY) { font(w, size, fam); return ctx.measureText(s).width; }
+function wrap(s, maxW, w, size, fam = BODY) {
+  font(w, size, fam);
+  const out = []; let line = "";
+  for (const word of s.split(" ")) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxW && line) { out.push(line); line = word; } else line = test;
+  }
+  if (line) out.push(line);
+  return out;
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
+/** A sticker: flat fill, ink outline, hard offset shadow. */
+function card(x, y, w, h, o = {}) {
+  const r = o.r ?? 56, s = o.shadow ?? 12;
+  if (s) { ctx.fillStyle = C.ink; rr(x + s, y + s, w, h, r); ctx.fill(); }
+  ctx.fillStyle = o.fill ?? C.surface; rr(x, y, w, h, r); ctx.fill();
+  ctx.lineWidth = o.line ?? 6.5; ctx.strokeStyle = C.ink; ctx.stroke();
+}
+function label(s, x, y, color = C.inkFaint, size = 30, align = "left") {
+  txt(s.toUpperCase(), x, y, { w: 800, size, color, ls: size * 0.14, align });
+}
+
+/* The app's supply glyphs, same 24px grid and paths as SupplyGlyph.tsx. */
+const GLYPHS = {
+  water: { fill: ["M9.5 2.5h5v2.2l1.3 1.6v13.4a2 2 0 0 1-2 2h-3.6a2 2 0 0 1-2-2V6.3l1.3-1.6z"], line: ["M8.2 11H15.8"] },
+  gel: { fill: ["M6.5 4.2h11v15.6h-11z"], line: ["M6.5 4.2l3 2.4-3 2.2", "M9.6 12H14.4", "M9.6 15.4H14.4"] },
+  banana: { fill: ["M5 6.4c0 8 5 12.4 11.3 12.4 1.9 0 2.9-.7 2.9-1.7 0-3.6-6-2.2-9.2-6.1C7.9 8.5 8.4 5.6 6.8 5.6 5.7 5.6 5 5.8 5 6.4z"], line: ["M6 5.8l.6-2"] },
+  jacket: { fill: ["M9 3.4L4.2 6v5.2l2.4.7v8.7h10.8v-8.7l2.4-.7V6L15 3.4z"], line: ["M12 4.6V20.6"] },
+  sign: { fill: ["M3.2 3.4h17.6v10.8H3.2z"], line: ["M12 14.2V21.4", "M6.6 7.2H17.4", "M6.6 10.4H13.6"] },
+  tissues: { fill: ["M4.4 9.4h15.2v10.4H4.4z"], line: ["M9.6 9.4V6.2c0-1.2 1-2.2 2.2-2.2s2.2 1 2.2 2.2v3.2"] },
+  electrolytes: { fill: ["M10 2.5h4v6l4 9.5a2.4 2.4 0 0 1-2.2 3.4H8.2A2.4 2.4 0 0 1 6 18l4-9.5z"], line: ["M9.4 2.5H14.6"] },
+};
+const PATHS = {};
+for (const k in GLYPHS) PATHS[k] = { fill: GLYPHS[k].fill.map((d) => new Path2D(d)), line: GLYPHS[k].line.map((d) => new Path2D(d)) };
+function glyph(kind, x, y, size, fill) {
+  const g = PATHS[kind];
+  ctx.save(); ctx.translate(x - size / 2, y - size / 2); ctx.scale(size / 24, size / 24);
+  ctx.lineWidth = 1.9; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = C.ink;
+  ctx.fillStyle = fill;
+  for (const p of g.fill) { ctx.fill(p); ctx.stroke(p); }
+  for (const p of g.line) ctx.stroke(p);
+  ctx.restore();
+}
+/** A supply pill as the plan shows it: glyph, name, count. */
+function supplyPill(x, y, kind, text, tone, s = 1) {
+  const w = measure(text, 800, 34) + 110, h = 70;
+  at(x + w / 2, y + h / 2, { s, a: s }, () => {
+    ctx.fillStyle = tone; rr(-w / 2, -h / 2, w, h, 35); ctx.fill();
+    ctx.lineWidth = 4.5; ctx.strokeStyle = C.ink; ctx.stroke();
+    glyph(kind, -w / 2 + 46, 0, 40, C.surface);
+    txt(text, -w / 2 + 80, 12, { size: 34, w: 800 });
+  });
+  return w;
+}
+function transit(x, y, lineName, color) {
+  const w = measure(lineName, 800, 28) + 26;
+  ctx.fillStyle = color; rr(x, y, w, 46, 10); ctx.fill();
+  txt(lineName, x + w / 2, y + 33, { size: 28, color: "#fff", align: "center" });
+  return w;
+}
+
+/* Faces. Approximations of GeoArt's generated avatars: a flat colour ground
+   and one or two shapes, so a squad reads as a squad without anyone's photo. */
+const FACES = {
+  ermis: { bg: C.sky, kind: "hill", hill: "#ECE6F0" },
+  lena: { bg: "#F1E8EF", kind: "moon", shape: "#B7A6F5" },
+  jonas: { bg: C.grape, kind: "tri" },
+  mara: { bg: C.rose, kind: "tri" },
+  tobi: { bg: C.mint, kind: "hill", hill: "#DDF3E9" },
+  sofia: { bg: C.grape, kind: "split" },
+  yannis: { bg: C.sky, kind: "hill", hill: "#F3EEE8" },
+};
+function face(x, y, r, key, ring) {
+  const f = FACES[key];
+  ctx.save();
+  ctx.fillStyle = C.ink; circle(x + r * 0.09, y + r * 0.12, r * 1.16); ctx.fill();
+  ctx.fillStyle = ring ?? C.surface; circle(x, y, r * 1.16); ctx.fill();
+  circle(x, y, r); ctx.save(); ctx.clip();
+  ctx.fillStyle = f.bg; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  ctx.fillStyle = "#fff";
+  if (f.kind === "hill") {
+    ctx.fillStyle = f.hill; ctx.beginPath(); ctx.ellipse(x, y + r * 0.98, r * 0.98, r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff"; circle(x, y - r * 0.28, r * 0.22); ctx.fill();
+  } else if (f.kind === "tri") {
+    ctx.beginPath(); ctx.moveTo(x, y - r * 0.58); ctx.lineTo(x + r * 0.62, y + r * 0.46); ctx.lineTo(x - r * 0.62, y + r * 0.46); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = f.bg; circle(x, y + r * 0.14, r * 0.17); ctx.fill();
+  } else if (f.kind === "moon") {
+    ctx.fillStyle = f.shape; circle(x - r * 0.35, y - r * 0.3, r * 0.78); ctx.fill();
+    ctx.fillStyle = "#fff"; circle(x + r * 0.2, y - r * 0.12, r * 0.15); ctx.fill();
+  } else if (f.kind === "split") {
+    ctx.fillStyle = "#F4ECE4"; ctx.beginPath(); ctx.ellipse(x, y + r * 0.9, r * 1.2, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff"; circle(x + r * 0.22, y - r * 0.28, r * 0.16); ctx.fill();
+  }
+  ctx.restore(); ctx.restore();
+}
+/** The runner on the map: a flare disc with a person in it. */
+function runnerDot(x, y, r) {
+  ctx.fillStyle = C.ink; circle(x + 5, y + 6, r + 4); ctx.fill();
+  ctx.fillStyle = C.flare; circle(x, y, r); ctx.fill();
+  ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke();
+  ctx.save(); circle(x, y, r - 3); ctx.clip();
+  ctx.fillStyle = C.flareSoft; circle(x, y - r * 0.22, r * 0.3); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.7, r * 0.55, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/* The Sideline mark: the course line, the runner's dot at its peak, and the
+   four friends underneath. Same geometry as assets/icon.png (512 grid). */
+const MARK = new Path2D("M95 338 C 140 330, 168 182, 226 178 C 290 174, 330 262, 415 262");
+function mark(cx, cy, size, t0, t, boxed = true) {
+  const k = size / 512;
+  ctx.save(); ctx.translate(cx - size / 2, cy - size / 2);
+  if (boxed) {
+    ctx.fillStyle = C.ink; rr(16, 16, size, size, size * 0.24); ctx.fill();
+    ctx.fillStyle = C.paper; rr(0, 0, size, size, size * 0.24); ctx.fill();
+    ctx.lineWidth = 8; ctx.strokeStyle = C.ink; ctx.stroke();
+  }
+  ctx.scale(k, k);
+  const d = eo(prog(t, t0, t0 + 0.55));
+  ctx.lineWidth = 48; ctx.lineCap = "round"; ctx.strokeStyle = C.ink;
+  ctx.setLineDash([520 * d, 1000]); ctx.stroke(MARK); ctx.setLineDash([]);
+  const s = pop(t, t0 + 0.35);
+  if (s > 0) { ctx.fillStyle = C.flare; circle(226, 178, 38 * s); ctx.fill(); }
+  [149, 226, 303, 380].forEach((x, i) => {
+    const q = pop(t, t0 + 0.5 + i * 0.07, 0.3);
+    if (q > 0) { ctx.fillStyle = "#827768"; circle(x, 403, 22 * q); ctx.fill(); }
+  });
+  ctx.restore();
+}
+
+/* The course as a snake: straight rows joined by half circles, the same fold
+   the app uses so all 42.2 km fit on a phone. Sampled into points so any
+   stretch of kilometres can be stroked or located. */
+function buildSnake(x0, x1, y0, gap, rows) {
+  const pts = [], R = gap / 2;
+  for (let row = 0; row < rows; row++) {
+    const y = y0 + row * gap, ltr = row % 2 === 0;
+    for (let i = row ? 1 : 0; i <= 40; i++) pts.push([lerp(ltr ? x0 : x1, ltr ? x1 : x0, i / 40), y]);
+    if (row < rows - 1) {
+      for (let i = 1; i < 30; i++) {
+        const th = ltr ? -Math.PI / 2 + (Math.PI * i) / 30 : -Math.PI / 2 - (Math.PI * i) / 30;
+        pts.push([(ltr ? x1 : x0) + R * Math.cos(th), y + R + R * Math.sin(th)]);
+      }
+    }
+  }
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  return { pts, cum, len: cum[cum.length - 1] };
+}
+function snakeAt(S, km) {
+  const d = clamp(km / 42.2) * S.len;
+  let i = 1; while (i < S.cum.length - 1 && S.cum[i] < d) i++;
+  const f = (d - S.cum[i - 1]) / (S.cum[i] - S.cum[i - 1] || 1);
+  return [lerp(S.pts[i - 1][0], S.pts[i][0], f), lerp(S.pts[i - 1][1], S.pts[i][1], f)];
+}
+function strokeSnake(S, km0, km1, color, width) {
+  if (km1 <= km0) return;
+  const d0 = (km0 / 42.2) * S.len, d1 = (km1 / 42.2) * S.len;
+  ctx.beginPath();
+  const a = snakeAt(S, km0); ctx.moveTo(a[0], a[1]);
+  for (let i = 0; i < S.pts.length; i++) if (S.cum[i] > d0 && S.cum[i] < d1) ctx.lineTo(S.pts[i][0], S.pts[i][1]);
+  const b = snakeAt(S, km1); ctx.lineTo(b[0], b[1]);
+  ctx.lineWidth = width; ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+}
+
+/** Speech bubble in the squad chat. Mine are flare, everyone else's white. */
+function bubble(t, t0, y, text, who, mine) {
+  const s = pop(t, t0, 0.38);
+  if (s <= 0) return;
+  const lines = wrap(text, 620, 700, 42);
+  const w = Math.max(...lines.map((l) => measure(l, 700, 42))) + 64;
+  const h = lines.length * 54 + 44;
+  const x = mine ? W - 90 - w : 190;
+  at(mine ? x + w : x, y + h, { s, a: s }, () => {
+    const bx = mine ? -w : 0;
+    ctx.fillStyle = mine ? C.flare : C.surface;
+    rr(bx, -h, w, h, [34, 34, mine ? 8 : 34, mine ? 34 : 8]); ctx.fill();
+    if (!mine) { ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke(); }
+    lines.forEach((l, i) => txt(l, bx + 32, -h + 66 + i * 54, { w: 700, size: 42, color: mine ? "#fff" : C.ink }));
+  });
+  if (who) at(130, y + h - 34, { s, a: s }, () => face(0, 0, 34, who));
+  return h;
+}
+function typingBubble(t, t0, y, who) {
+  const s = pop(t, t0, 0.38);
+  if (s <= 0) return;
+  at(190, y + 92, { s, a: s }, () => {
+    ctx.fillStyle = C.surface; rr(0, -92, 170, 92, [34, 34, 34, 8]); ctx.fill();
+    ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const b = Math.sin((t - t0) * 9 - i * 0.9);
+      ctx.fillStyle = C.inkFaint; circle(48 + i * 37, -46 - Math.max(0, b) * 10, 11); ctx.fill();
+    }
+  });
+  at(130, y + 58, { s, a: s }, () => face(0, 0, 34, who));
+}
+
+/** Label + headline block at the top of each scene, clear of Instagram's top bar. */
+function caption(t, lab, lines, o = {}) {
+  const y0 = o.y ?? 330, size = o.size ?? 112;
+  at(90, y0, { a: fade(t, 0.02), s: 1 }, () => label(lab, 0, 0, o.labColor ?? C.flare, 32));
+  lines.forEach((l, i) => {
+    const q = eo(prog(t, 0.06 + i * 0.1, 0.46 + i * 0.1));
+    at(90, y0 + 20 + (i + 1) * size * 0.98 + (1 - q) * 50, { a: q }, () => txt(l, 0, 0, { fam: HEAD, w: 900, size, color: o.colors?.[i] ?? C.ink, ls: -size * 0.02 }));
+  });
+}
+
+/* A little burst of confetti in the palette, for the good moments. */
+function burst(t, t0, x, y, n = 18, spread = 260) {
+  if (still) return;
+  const q = prog(t, t0, t0 + 0.9);
+  if (q <= 0 || q >= 1) return;
+  const cols = [C.flare, C.sun, C.mint, C.sky, C.rose, C.grape];
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * Math.PI * 2 + i * 0.37;
+    const dist = eo(q) * spread * (0.6 + ((i * 53) % 10) / 22);
+    const px = x + Math.cos(ang) * dist, py = y + Math.sin(ang) * dist + q * q * 120;
+    ctx.save(); ctx.globalAlpha *= 1 - q; ctx.translate(px, py); ctx.rotate(ang + q * 6);
+    ctx.fillStyle = cols[i % cols.length];
+    if (i % 2) ctx.fillRect(-9, -5, 18, 10); else { circle(0, 0, 8); ctx.fill(); }
+    ctx.restore();
+  }
+}
+
+/* ── Scenes ─────────────────────────────────────────────────────────────── */
+
+// 1. The hook: you are about to run 42.2 km, and your friends want to be there.
+function sceneHook(t) {
+  at(90, 360, { a: fade(t, 0.05) }, () => label("Sunday morning, race day", 0, 0, C.flare, 32));
+  const words = [["You're", "running"], ["a", "marathon."]];
+  let k = 0;
+  words.forEach((line, li) => {
+    let x = 90;
+    line.forEach((wd) => {
+      const q = eo(prog(t, 0.1 + k * 0.08, 0.5 + k * 0.08));
+      const w = measure(wd + " ", 900, 148, HEAD);
+      at(x, 530 + li * 150 + (1 - q) * 70, { a: q }, () => txt(wd, 0, 0, { fam: HEAD, w: 900, size: 148, ls: -3 }));
+      x += w; k++;
+    });
+  });
+  // The distance, slapped on like a sticker.
+  const s = pop(t, 0.95, 0.45);
+  at(540, 930, { s, r: -0.07 }, () => {
+    card(-300, -110, 600, 220, { fill: C.flare, r: 110, shadow: 14 });
+    txt("42.2 km", 0, 52, { fam: HEAD, w: 900, size: 150, color: "#fff", align: "center", ls: -3 });
+  });
+  at(540, 1170, { a: fade(t, 1.6, 0.25) }, () => txt("And your friends want to be there.", 0, 0, { size: 54, w: 800, color: C.inkSoft, align: "center" }));
+  // The course line with the runner's dot on it, the app's own motif.
+  const line = new Path2D("M-40 1470 C 140 1470, 200 1360, 340 1360 C 470 1360, 520 1480, 660 1480 C 800 1480, 860 1380, 1120 1380");
+  const d = eo(prog(t, 0.2, 1.4));
+  ctx.save(); ctx.lineWidth = 30; ctx.lineCap = "round"; ctx.strokeStyle = C.ink;
+  ctx.setLineDash([1400 * d, 3000]); ctx.stroke(line); ctx.setLineDash([]); ctx.restore();
+  if (d > 0.4) {
+    const p = bezPoint(lerp(60, 900, eio(prog(t, 0.8, 3.0))));
+    ctx.fillStyle = C.flare; circle(p[0], p[1], 30); ctx.fill();
+    ctx.lineWidth = 6; ctx.strokeStyle = C.ink; ctx.stroke();
+  }
+}
+// y on the hook's course line for a given x, from its three cubic segments.
+const HOOK_SEGS = [
+  [[-40, 1470], [140, 1470], [200, 1360], [340, 1360]],
+  [[340, 1360], [470, 1360], [520, 1480], [660, 1480]],
+  [[660, 1480], [800, 1480], [860, 1380], [1120, 1380]],
+];
+function bezPoint(x) {
+  const seg = HOOK_SEGS.find((s) => x <= s[3][0]) ?? HOOK_SEGS[2];
+  let lo = 0, hi = 1, p;
+  for (let i = 0; i < 24; i++) {
+    const m = (lo + hi) / 2; p = cubic(seg, m);
+    if (p[0] < x) lo = m; else hi = m;
+  }
+  return p;
+}
+function cubic(s, u) {
+  const v = 1 - u;
+  return [0, 1].map((k) => v * v * v * s[0][k] + 3 * v * v * u * s[1][k] + 3 * v * u * u * s[2][k] + u * u * u * s[3][k]);
+}
+
+// 2. The problem: the group chat on race day.
+function sceneChaos(t) {
+  caption(t, "Race day, the usual way", ["The group chat."], { size: 120 });
+  const land = 1.85; // just after "who brings what?" in the voiceover
+  const shake = t > land && t < land + 0.35 ? Math.sin((t - land) * 70) * 10 * (1 - (t - land) / 0.35) : 0;
+  ctx.save(); ctx.translate(shake, 0);
+  const rows = [
+    ["where is everyone??", "lena", false],
+    ["km 5, by the bakery", null, true],
+    ["wait, me too", "tobi", false],
+    ["also km 5 haha", "sofia", false],
+    ["ok but who is at km 30?", null, true],
+  ];
+  let y = 590;
+  rows.forEach(([s, who, mine], i) => { const h = bubble(t, 0.3 + i * 0.26, y, s, who, mine); y += (h ?? 98) + 24; });
+  typingBubble(t, 0.3 + rows.length * 0.26, y, "mara");
+  ctx.restore();
+  // The stamp.
+  const s = pop(t, land - 0.12, 0.34);
+  at(540, 1300, { s: s ? lerp(1.6, 1, clamp(s)) * (s > 1 ? s : 1) : 0, r: -0.06, a: fade(t, land - 0.12, 0.1) }, () => {
+    card(-420, -130, 840, 260, { fill: C.rose, r: 46, shadow: 14 });
+    txt("Three people at km 5.", 0, -18, { fam: HEAD, w: 900, size: 72, color: "#fff", align: "center" });
+    txt("Nobody at km 30.", 0, 70, { fam: HEAD, w: 900, size: 72, color: "#fff", align: "center" });
+  });
+}
+
+// 3. The name.
+function sceneBrand(t) {
+  const s = pop(t, 0.0, 0.5);
+  at(540, 720, { s }, () => mark(0, 0, 360, 0.1, t));
+  const q = pop(t, 0.45, 0.45);
+  at(540, 1110, { s: q }, () => txt("Sideline", 0, 0, { fam: HEAD, w: 900, size: 210, align: "center", ls: -5 }));
+  const a = eo(prog(t, 0.8, 1.2));
+  at(540, 1240 + (1 - a) * 40, { a }, () => {
+    txt("Your cheer squad,", 0, 0, { size: 76, w: 800, color: C.inkSoft, align: "center" });
+    txt("organised.", 0, 92, { size: 76, w: 800, color: C.flare, align: "center" });
+  });
+  burst(t, 0.55, 540, 720, 22, 360);
+}
+
+// 4. Who stands where, and the gap that nobody covered.
+const SNAKE = buildSnake(230, 850, 890, 180, 3);
+function sceneCoverage(t) {
+  caption(t, "1 · Pick a spot", ["See who stands", "where."], { size: 104 });
+  const cs = eo(prog(t, 0.1, 0.45));
+  at(0, (1 - cs) * 200, { a: cs }, () => {
+    card(80, 600, 920, 880);
+    label("Route coverage", 130, 675);
+    const fixed = eo(prog(t, 2.3, 2.6));
+    at(130, 740, { a: 1 - fixed }, () => txt("Nobody from km 17 to 41.", 0, 0, { size: 50, w: 800 }));
+    at(130, 740, { a: fixed }, () => txt("The hard part is covered.", 0, 0, { size: 50, w: 800 }));
+    const score = Math.round(lerp(24, 71, eio(prog(t, 2.2, 2.8))));
+    const col = t < 2.45 ? C.rose : C.mint;
+    const bump = 1 + 0.18 * Math.sin(Math.PI * prog(t, 2.2, 2.8));
+    at(930, 760, { s: bump }, () => txt(String(score), 0, 0, { fam: HEAD, w: 900, size: 120, color: col, align: "right" }));
+    label("of 100", 930, 800, C.inkFaint, 24, "right");
+
+    // The course draws itself.
+    const d = eo(prog(t, 0.2, 1.0)) * 42.2;
+    strokeSnake(SNAKE, 0, d, C.ink, 80);
+    strokeSnake(SNAKE, 0, d, C.surface, 66);
+    // The gap: a long empty stretch, pulsing until Jonas moves into it.
+    const gapIn = fade(t, 1.05, 0.2) * (1 - fixed);
+    if (gapIn > 0) {
+      ctx.save(); ctx.globalAlpha *= gapIn;
+      strokeSnake(SNAKE, 17.1, 40.9, C.roseSoft, 66 - 10 * (0.5 + 0.5 * Math.sin(t * 12)));
+      ctx.restore();
+    }
+    if (fixed > 0) {
+      ctx.save(); ctx.globalAlpha *= fixed;
+      strokeSnake(SNAKE, 18.2, 27.2, C.sunSoft, 60);
+      strokeSnake(SNAKE, 29.8, 39.4, C.sunSoft, 60);
+      ctx.restore();
+    }
+    // Start dot and finish flag.
+    if (d > 0.2) { const a = snakeAt(SNAKE, 0); ctx.fillStyle = C.ink; circle(a[0], a[1], 12); ctx.fill(); }
+    if (d > 42) {
+      const b = snakeAt(SNAKE, 42.2);
+      ctx.lineWidth = 6; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.moveTo(b[0] + 30, b[1]); ctx.lineTo(b[0] + 30, b[1] - 70); ctx.stroke();
+      ctx.fillStyle = C.flare; ctx.beginPath(); ctx.moveTo(b[0] + 30, b[1] - 70); ctx.lineTo(b[0] + 78, b[1] - 55); ctx.lineTo(b[0] + 30, b[1] - 40); ctx.closePath(); ctx.fill(); ctx.lineWidth = 4; ctx.stroke();
+    }
+    // Friends land on their spots.
+    const jonasKm = lerp(16.7, 28.5, eio(prog(t, 2.05, 2.7)));
+    const people = [["yannis", 1.2], ["mara", 7.8], ["tobi", 14.2], ["sofia", 16.0], ["jonas", jonasKm], ["lena", 40.4]];
+    people.forEach(([who, km], i) => {
+      const s = pop(t, 0.75 + i * 0.1, 0.4);
+      const p = snakeAt(SNAKE, km);
+      at(p[0], p[1], { s }, () => face(0, 0, 40, who));
+    });
+    // The callout on the gap.
+    const cq = pop(t, 1.25, 0.4) * (1 - fixed);
+    const cp = snakeAt(SNAKE, 21.5);
+    at(cp[0], cp[1] - 88, { s: cq, a: cq }, () => {
+      ctx.fillStyle = C.rose; rr(-200, -48, 400, 84, 42); ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-18, 34); ctx.lineTo(0, 58); ctx.lineTo(18, 34); ctx.fillStyle = C.rose; ctx.fill();
+      txt("23.8 km on his own", 0, 10, { size: 36, w: 800, color: "#fff", align: "center" });
+    });
+
+    // Lena's proposal and the tap that applies it.
+    const pq = eo(prog(t, 1.5, 1.8));
+    at(0, (1 - pq) * 60, { a: pq }, () => {
+      ctx.fillStyle = C.skySoft; rr(120, 1330, 840, 116, 30); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = C.ink; ctx.stroke();
+      face(180, 1388, 30, "jonas");
+      txt("Jonas moves to km 28.5", 232, 1380, { size: 36, w: 800 });
+      txt("Lena suggested this · 3 up for it", 232, 1422, { size: 26, w: 600, color: C.inkFaint });
+      const press = t > 1.9 && t < 2.08 ? 1 : 0;
+      const done = t >= 2.08;
+      const bx = 740 + press * 5, by = 1350 + press * 5;
+      ctx.fillStyle = C.ink; rr(740 + 7, 1350 + 7, 196, 76, 38); ctx.fill();
+      ctx.fillStyle = done ? C.mint : C.flare; rr(bx, by, 196, 76, 38); ctx.fill(); ctx.lineWidth = 4.5; ctx.stroke();
+      txt(done ? "Applied" : "Apply it", bx + 98, by + 50, { size: 34, w: 800, color: "#fff", align: "center" });
+    });
+  });
+  burst(t, 2.5, 850, 760, 16, 200);
+}
+
+// 5. Who brings what, and which train to get there.
+function sceneSupplies(t) {
+  caption(t, "2 · Say what you bring", ["Water, gels,", "a big sign."], { size: 104 });
+  const rows = [
+    { km: "7.8", name: "Friedrichstadtpalast", lines: [["U6", "#8C6DAB"]], walk: "+ 2 min walk", time: "09:56", pm: "±8 MIN", who: ["mara"],
+      pills: [["water", "Water ×2", C.skySoft], ["tissues", "Tissues", C.paperWarm]] },
+    { km: "15.3", name: "Kottbusser Tor", lines: [["U1", "#7DAD4C"], ["U3", "#16683D"], ["U8", "#224F86"]], walk: "right there", time: "10:36", pm: "±12 MIN", who: ["tobi", "sofia"],
+      pills: [["electrolytes", "Electrolytes", C.mintSoft], ["gel", "Gels ×2", C.roseSoft]] },
+    { km: "28.5", name: "Platz am Wilden Eber", lines: [["U3", "#16683D"]], walk: "+ 12 min walk", time: "11:31", pm: "±15 MIN", who: ["jonas"],
+      pills: [["banana", "Banana ×2", C.sunSoft], ["sign", "Big sign", C.grapeSoft]] },
+  ];
+  const cs = eo(prog(t, 0.05, 0.35));
+  at(0, (1 - cs) * 200, { a: cs }, () => {
+    card(80, 590, 920, 900);
+    txt("Race day plan", 130, 680, { fam: HEAD, w: 900, size: 60 });
+    rows.forEach((r, i) => {
+      const y = 730 + i * 250;
+      const q = eo(prog(t, 0.25 + i * 0.22, 0.6 + i * 0.22));
+      at((1 - q) * 300, 0, { a: q }, () => {
+        ctx.fillStyle = C.paperWarm; rr(130, y, 118, 110, 24); ctx.fill();
+        txt(r.km, 189, y + 56, { fam: HEAD, w: 900, size: r.km.length > 3 ? 42 : 46, align: "center" });
+        label("km", 189, y + 90, C.inkSoft, 22, "center");
+        fitTxt(r.name, 280, y + 42, 470, { size: 44, w: 800 });
+        let x = 280;
+        r.lines.forEach(([n, c]) => { x += transit(x, y + 62, n, c) + 10; });
+        txt(r.walk, x + 4, y + 96, { size: 28, w: 600, color: C.inkSoft });
+        txt(r.time, 950, y + 44, { fam: HEAD, w: 900, size: 50, align: "right" });
+        label(r.pm, 950, y + 80, C.inkFaint, 22, "right");
+        if (i < rows.length - 1) { ctx.fillStyle = C.ink; ctx.fillRect(187, y + 124, 4, 110); }
+      });
+      // Faces and supplies pop in after the row lands.
+      r.who.forEach((w, j) => { const s = pop(t, 0.5 + i * 0.22 + j * 0.06, 0.35); at(310 + j * 90, y + 170, { s }, () => face(0, 0, 32, w)); });
+      let px = 290 + r.who.length * 90;
+      r.pills.forEach(([k, label2, tone], j) => {
+        const s = pop(t, 0.62 + i * 0.22 + j * 0.1, 0.38);
+        px += supplyPill(px, y + 135, k, label2, tone, s) + 14;
+      });
+    });
+  });
+  at(540, 1565, { a: fade(t, 1.4, 0.25) }, () => txt("So nobody brings three bananas and no water.", 0, 0, { size: 38, w: 700, color: C.inkSoft, align: "center" }));
+}
+
+// 6. Race day: the runner live, from three sources.
+function sceneLive(t) {
+  caption(t, "3 · Race day", ["Follow them live."], { size: 112 });
+  const cs = eo(prog(t, 0.05, 0.35));
+  const runKm = lerp(9, 28.5, eio(prog(t, 0.3, 2.3)));
+  at(0, (1 - cs) * 200, { a: cs }, () => {
+    card(80, 520, 920, 270, { r: 48 });
+    const x0 = 150, x1 = 930, y = 650;
+    const X = (km) => lerp(x0, x1, km / 42.2);
+    ctx.lineCap = "round";
+    ctx.lineWidth = 58; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    ctx.lineWidth = 46; ctx.strokeStyle = C.surface; ctx.stroke();
+    ctx.strokeStyle = C.mint; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(X(runKm), y); ctx.stroke();
+    [["0", 0], ["21.1", 21.1], ["42.2", 42.2]].forEach(([s, km]) => txt(s, X(km), 740, { size: 28, w: 800, color: C.inkFaint, align: "center" }));
+    [["mara", 7.8], ["tobi", 15.3], ["jonas", 28.5], ["lena", 40.4]].forEach(([w, km]) => {
+      const seen = runKm >= km - 0.05;
+      face(X(km), y, 30, w, seen ? C.mint : undefined);
+    });
+    runnerDot(X(runKm), y, 38);
+    // Jonas's ETA, counting down as the runner closes in.
+    const mins = Math.max(0, Math.round((28.5 - runKm) * 0.53));
+    const eq = pop(t, 0.6, 0.35) * (1 - fade(t, 2.25, 0.1));
+    at(X(28.5), 575, { s: eq, a: eq }, () => {
+      const s = `Jonas · ${mins} min`;
+      const w = measure(s, 800, 30) + 44;
+      ctx.fillStyle = C.ink; rr(-w / 2, -32, w, 56, 28); ctx.fill();
+      txt(s, 0, 7, { size: 30, w: 800, color: C.paper, align: "center" });
+    });
+  });
+
+  const ways = [
+    { tone: C.skySoft, title: "Official race tracking", body: "Linked by bib number. Keeps going with the phone locked." },
+    { tone: C.mintSoft, title: "The runner's own phone", body: "Live GPS, shared with the squad only." },
+    { tone: C.flareSoft, title: "“I just saw them!”", body: "One tap from a friend puts the dot right." },
+  ];
+  ways.forEach((wy, i) => {
+    const y = 860 + i * 225;
+    const q = eo(prog(t, 0.35 + i * 0.3, 0.7 + i * 0.3));
+    at(0, (1 - q) * 120, { a: q }, () => {
+      card(80, y, 920, 195, { fill: wy.tone, r: 44, shadow: 10 });
+      ctx.fillStyle = C.flare; circle(165, y + 97, 40); ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke();
+      txt(String(i + 1), 165, y + 115, { fam: HEAD, w: 900, size: 50, color: "#fff", align: "center" });
+      fitTxt(wy.title, 235, y + 85, 720, { size: 50, w: 800 });
+      const lines = wrap(wy.body, 720, 600, 34);
+      lines.slice(0, 2).forEach((l, k) => txt(l, 235, y + 132 + k * 40, { size: 34, w: 600, color: C.inkSoft }));
+    });
+  });
+  // The moment: the runner reaches Jonas, on "and they're ready for you".
+  const tq = pop(t, 2.3, 0.4);
+  at(540, 826, { s: tq, a: tq }, () => {
+    const s = "Jonas just saw Ermis at km 28.5";
+    const w = measure(s, 800, 38) + 150;
+    ctx.fillStyle = C.flare; rr(-w / 2 + 8, -52 + 8, w, 104, 52); ctx.fill();
+    ctx.fillStyle = C.ink; rr(-w / 2, -52, w, 104, 52); ctx.fill();
+    face(-w / 2 + 62, 0, 30, "jonas", C.mint);
+    txt(s, -w / 2 + 112, 13, { size: 38, w: 800, color: C.paper });
+  });
+  burst(t, 2.3, lerp(150, 930, 28.5 / 42.2), 650, 20, 240);
+}
+
+// 7. The chat and the wall.
+function scenePeople(t) {
+  caption(t, "4 · All together", ["One chat.", "Every photo."], { size: 104 });
+  let y = 590;
+  y += bubble(t, 0.15, y, "Got him. He saw me and picked it straight back up.", "jonas", false) ?? 150; y += 22;
+  y += bubble(t, 0.4, y, "HE IS ON THE LINDEN", "lena", false) ?? 98; y += 22;
+  bubble(t, 0.62, y, "Legend.", null, true);
+  const tiles = [
+    { x: 70, r: -0.07, t0: 0.75, draw: photoBunting, title: "RUN ERMIS RUN", who: "mara", star: true },
+    { x: 395, r: 0.04, t0: 0.9, draw: photoExpo, title: "Bib collected", who: "lena" },
+    { x: 720, r: -0.03, t0: 1.05, draw: photoDrum, title: "The drum, in position", who: "tobi" },
+  ];
+  tiles.forEach((tl) => {
+    const s = pop(t, tl.t0, 0.42);
+    at(tl.x + 145, 1260, { s, r: tl.r * s }, () => {
+      card(-145, -190, 290, 380, { r: 28, shadow: 10, line: 5 });
+      ctx.save(); rr(-137, -182, 274, 250, [22, 22, 0, 0]); ctx.clip(); tl.draw(-137, -182, 274, 250); ctx.restore();
+      ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.moveTo(-145, 68); ctx.lineTo(145, 68); ctx.stroke();
+      fitTxt(tl.title, -120, 118, 200, { size: 28, w: 800 });
+      face(-104, 156, 16, tl.who);
+      txt(tl.who[0].toUpperCase() + tl.who.slice(1), -80, 166, { size: 26, w: 700, color: C.inkSoft });
+      star(112, 108, 20, tl.star);
+    });
+  });
+}
+function star(x, y, r, filled) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, rad = i % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); }
+  ctx.closePath(); ctx.lineJoin = "round";
+  if (filled) { ctx.fillStyle = C.sun; ctx.fill(); }
+  ctx.lineWidth = 3.5; ctx.strokeStyle = filled ? C.sun : C.inkFaint; ctx.stroke();
+}
+function stick(x, y, s, col) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 5; ctx.lineCap = "round";
+  circle(0, -34, 8); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -24); ctx.lineTo(0, 2); ctx.moveTo(-14, -14); ctx.lineTo(14, -14);
+  ctx.moveTo(0, 2); ctx.lineTo(-12, 22); ctx.moveTo(0, 2); ctx.lineTo(12, 22); ctx.stroke();
+  ctx.restore();
+}
+function photoBunting(x, y, w, h) {
+  ctx.fillStyle = C.ink; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#E9E4DC"; ctx.beginPath(); ctx.moveTo(x, y + h * 0.5); ctx.lineTo(x + w, y + h * 0.9); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.fill();
+  ctx.fillStyle = C.sun; circle(x + w * 0.72, y + h * 0.42, 44); ctx.fill();
+  ctx.strokeStyle = "#E9E4DC"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y + 30); ctx.lineTo(x + w, y + 38); ctx.stroke();
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? C.sun : "#FFF"; const bx = x + 12 + i * 46; ctx.beginPath(); ctx.moveTo(bx, y + 31); ctx.lineTo(bx + 26, y + 33); ctx.lineTo(bx + 13, y + 62); ctx.fill(); }
+  stick(x + 50, y + h - 50, 1, C.ink); stick(x + 140, y + h - 38, 1, C.ink);
+}
+function photoExpo(x, y, w, h) {
+  ctx.fillStyle = C.grape; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#F3EDF3"; ctx.beginPath(); ctx.moveTo(x, y + h * 0.62); ctx.lineTo(x + w, y + h * 0.5); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.fill();
+  ctx.fillStyle = C.ink; circle(x + w * 0.62, y + h * 0.3, 40); ctx.fill();
+  [0.18, 0.4, 0.62, 0.84].forEach((f) => stick(x + w * f, y + h - 42, 0.95, C.grape));
+}
+function photoDrum(x, y, w, h) {
+  ctx.fillStyle = C.sky; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#EDEBE6"; ctx.beginPath(); ctx.moveTo(x, y + h * 0.55); ctx.lineTo(x + w, y + h * 0.7); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.fill();
+  ctx.fillStyle = C.mint; circle(x + w * 0.7, y + h * 0.28, 44); ctx.fill();
+  for (let i = 0; i < 7; i++) { circle(x + 20 + i * 40, y + h * 0.5 + (i % 2) * 6, 11 + (i % 3) * 2); ctx.fill(); }
+  [0.2, 0.45, 0.7].forEach((f) => stick(x + w * f, y + h - 36, 0.9, C.sky));
+}
+
+// 8. Where to get it.
+function sceneEnd(t) {
+  const s = pop(t, 0.0, 0.45);
+  at(540, 560, { s }, () => mark(0, 0, 250, 0.05, t + 1));
+  at(540, 850, { s: pop(t, 0.12, 0.45) }, () => txt("Sideline", 0, 0, { fam: HEAD, w: 900, size: 180, align: "center", ls: -4 }));
+  const a = eo(prog(t, 0.25, 0.6));
+  at(540, 960 + (1 - a) * 30, { a }, () => txt("Get your people to the right kilometre.", 0, 0, { size: 46, w: 800, color: C.inkSoft, align: "center" }));
+  const b = pop(t, 0.4, 0.45);
+  at(540, 1140, { s: b }, () => {
+    card(-420, -80, 840, 160, { fill: C.flare, r: 80, shadow: 14 });
+    txt("sideline-ermis.web.app", 0, 20, { size: 60, w: 800, color: "#fff", align: "center" });
+  });
+  const c = eo(prog(t, 0.65, 0.95));
+  at(0, (1 - c) * 30, { a: c }, () => {
+    const pills = [["Free", C.flareSoft], ["Live on the web", C.mintSoft], ["Apps soon", C.sunSoft]];
+    const ws = pills.map(([p]) => measure(p, 800, 36) + 56);
+    let x = 540 - (ws.reduce((m, w) => m + w, 0) + 18 * (pills.length - 1)) / 2;
+    pills.forEach(([p, tone], i) => {
+      ctx.fillStyle = tone; rr(x, 1300, ws[i], 76, 38); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = C.ink; ctx.stroke();
+      txt(p, x + ws[i] / 2, 1350, { size: 36, w: 800, align: "center" });
+      x += ws[i] + 18;
+    });
+    txt("Friends join with one link. No account, no app store.", 540, 1460, { size: 38, w: 600, color: C.inkSoft, align: "center" });
+  });
+}
+
+/* ── The timeline ───────────────────────────────────────────────────────── */
+// Scene boundaries follow the voiceover (voiceover.json), so each line is
+// spoken over the scene it describes.
+const SCENES = [
+  [0.0, 3.4, sceneHook],
+  [3.4, 6.1, sceneChaos],
+  [6.1, 8.6, sceneBrand],
+  [8.6, 11.75, sceneCoverage],
+  [11.75, 13.9, sceneSupplies],
+  [13.9, 17.55, sceneLive],
+  [17.55, 19.8, scenePeople],
+  [19.8, DUR, sceneEnd],
+];
+const OUT = 0.26;
+
+function background(t) {
+  ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+  if (still) return;
+  ctx.fillStyle = C.sunSoft; circle(960 + Math.sin(t * 0.6) * 30, 150 + Math.cos(t * 0.5) * 20, 250); ctx.fill();
+  ctx.fillStyle = C.flareSoft; circle(60 + Math.cos(t * 0.5) * 30, 1820 + Math.sin(t * 0.7) * 20, 280); ctx.fill();
+}
+
+function renderFrame(t) {
+  t = clamp(t, 0, DUR);
+  ctx = screen;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  background(t);
+  for (const [a, b, fn] of SCENES) {
+    const last = b >= DUR;
+    if (t < a || (t >= b && !last)) continue;
+    const o = last ? 0 : eio(prog(t, b - OUT, b));
+    ctx = bufCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, W, H);
+    fn(t - a);
+    ctx = screen;
+    ctx.globalAlpha = 1 - o;
+    ctx.drawImage(buf, 0, -140 * o);
+    ctx.globalAlpha = 1;
+  }
+}
+window.renderFrame = renderFrame;
+// Stills for the website: the same frame on a plain ground, without confetti.
+let still = false;
+window.renderStill = (t) => { still = true; try { renderFrame(t); } finally { still = false; } };
+window.REEL = { W, H, FPS, DUR };
+
+/* ── Player ─────────────────────────────────────────────────────────────── */
+const render = new URLSearchParams(location.search).has("render");
+if (render) document.body.classList.add("render");
+const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub");
+const timeEl = document.getElementById("time"), recBtn = document.getElementById("rec");
+let playing = !render, t0 = performance.now(), offset = 0, recording = false, soundOn = false;
+
+const vo = document.getElementById("vo");
+function show(t) { renderFrame(t); scrub.value = t; timeEl.textContent = `${t.toFixed(1)} / ${DUR}s`; }
+// The voiceover follows the picture: started, stopped and re-seeked with it.
+function voiceAt(t, on) {
+  if (render) return;
+  if (Math.abs(vo.currentTime - t) > 0.15) vo.currentTime = t;
+  if (on && vo.paused) vo.play().catch(() => {});
+  if (!on && !vo.paused) vo.pause();
+}
+function tick(now) {
+  if (playing) {
+    let t = offset + (now - t0) / 1000;
+    if (t >= DUR) {
+      if (recording) { show(DUR); stopRecording(); return requestAnimationFrame(tick); }
+      t = 0; offset = 0; t0 = now; vo.currentTime = 0;
+    }
+    show(t);
+    if (soundOn && vo.paused && !vo.ended) voiceAt(t, true);
+  }
+  requestAnimationFrame(tick);
+}
+playBtn.onclick = () => {
+  if (playing) { offset = +scrub.value; playing = false; playBtn.textContent = "Play"; voiceAt(offset, false); }
+  else { if (+scrub.value >= DUR) scrub.value = 0; offset = +scrub.value; t0 = performance.now(); playing = true; playBtn.textContent = "Pause"; voiceAt(offset, true); }
+};
+scrub.oninput = () => { playing = false; playBtn.textContent = "Play"; offset = +scrub.value; show(offset); voiceAt(offset, false); };
+
+// Browser-side export: plays once in real time and records the canvas.
+let recorder, chunks;
+recBtn.onclick = () => {
+  if (recording || !window.MediaRecorder) return;
+  const types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+  const type = types.find((m) => MediaRecorder.isTypeSupported(m)) || "";
+  const stream = cv.captureStream(FPS);
+  try { if (vo.captureStream) vo.captureStream().getAudioTracks().forEach((tr) => stream.addTrack(tr)); } catch (e) { /* silent recording */ }
+  recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 12e6 });
+  chunks = [];
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "sideline-reel." + (recorder.mimeType.includes("mp4") ? "mp4" : "webm");
+    a.click();
+    recBtn.disabled = false; recBtn.textContent = "Record a video file";
+  };
+  recording = true; recBtn.disabled = true; recBtn.textContent = "Recording…";
+  offset = 0; t0 = performance.now(); playing = true; playBtn.textContent = "Pause";
+  vo.currentTime = 0; voiceAt(0, true);
+  recorder.start();
+};
+function stopRecording() { recording = false; playing = false; playBtn.textContent = "Play"; voiceAt(DUR, false); recorder.stop(); }
+
+// Draw nothing until the brand fonts are in, or the first frames use a fallback.
+window.ready = Promise.all([document.fonts.load('900 100px "Gabarito"'), document.fonts.load('800 40px "Figtree"'), document.fonts.load('600 40px "Figtree"')])
+  .then(() => document.fonts.ready)
+  .then(() => { show(0); if (!render) requestAnimationFrame((n) => { t0 = n; tick(n); }); });
+// Browsers block sound until the page is touched, so the first autoplay loop is
+// silent; any press on the page starts the voice in sync.
+document.addEventListener("pointerdown", () => { soundOn = true; });
+</script>
+</body>
+</html>
